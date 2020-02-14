@@ -1,9 +1,12 @@
-const any = c_void;
-
 fn Closure(comptime Return: type) type {
     return struct {
-        func: fn (args: *const any) Return,
-        args: *const any,
+        func: fn (args: ?*const c_void) callconv(.C) Return,
+        args: *const c_void,
+
+        fn c_args(self: @This()) *c_void {
+            const nukular = @ptrToInt(self.args);
+            return @intToPtr(*c_void, nukular);
+        }
 
         fn call(self: @This()) Return {
             return self.func(self.args);
@@ -33,13 +36,13 @@ fn Context(comptime func: var, comptime Args: type) type {
             return .{ .wrapped_args = .{ .data = args } };
         }
 
-        fn wrapper(raw: *const any) Return {
+        fn wrapper(raw: ?*const c_void) callconv(.C) Return {
             const wrapped_args = @ptrCast(*const WrappedArgs, @alignCast(@alignOf(WrappedArgs), raw));
             return @call(.{}, wrappedFunc, wrapped_args.data);
         }
 
         pub fn bind(self: *const Self) Closure(Return) {
-            return .{ .func = wrapper, .args = @ptrCast(*const any, &self.wrapped_args) };
+            return .{ .func = wrapper, .args = @ptrCast(*const c_void, &self.wrapped_args) };
         }
     };
 }
@@ -57,4 +60,13 @@ test "simple" {
     const ctx1 = initContext(std.mem.alignForward, .{ 1, 4 });
     const closure1 = ctx1.bind();
     std.testing.expectEqual(closure1.call(), 4);
+}
+
+test "c" {
+    const c = @cImport({
+        @cInclude("test.h");
+    });
+    const ctx0 = initContext(std.mem.alignForward, .{ 1, 8 });
+    const closure0 = ctx0.bind();
+    std.testing.expectEqual(closure0.call(), c.invoke(closure0.func, closure0.c_args()));
 }
