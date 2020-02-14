@@ -12,9 +12,12 @@ fn Closure(comptime Return: type) type {
 }
 
 fn Context(comptime func: var, comptime Args: type) type {
+    const FnInfo = @typeInfo(@TypeOf(func)).Fn;
+    if (FnInfo.is_generic) @compileError("TODO: support generic functions");
+
     return struct {
         const Self = @This();
-        const Return = @typeInfo(@TypeOf(func)).Fn.return_type orelse void;
+        const Return = FnInfo.return_type orelse void;
 
         pub const wrappedFunc = func;
         wrapped_args: WrappedArgs,
@@ -22,7 +25,7 @@ fn Context(comptime func: var, comptime Args: type) type {
         const WrappedArgs = union {
             data: Args,
 
-            // This needs to exist to force a zero sized struct (comptime literal) to exist at runtime
+            // This needs to exist to force a zero sized tuple (comptime literal) to exist at runtime
             _force_real: usize,
         };
 
@@ -35,12 +38,23 @@ fn Context(comptime func: var, comptime Args: type) type {
             return @call(.{}, wrappedFunc, wrapped_args.data);
         }
 
-        pub fn closure(self: *const Self) Closure(Return) {
+        pub fn bind(self: *const Self) Closure(Return) {
             return .{ .func = wrapper, .args = @ptrCast(*const any, &self.wrapped_args) };
         }
     };
 }
 
-fn bind(comptime func: var, args: var) Context(func, @TypeOf(args)) {
+fn initContext(comptime func: var, args: var) Context(func, @TypeOf(args)) {
     return Context(func, @TypeOf(args)).init(args);
+}
+
+const std = @import("std");
+test "simple" {
+    const ctx0 = initContext(std.mem.alignForward, .{ 1, 8 });
+    const closure0 = ctx0.bind();
+    std.testing.expectEqual(closure0.call(), 8);
+
+    const ctx1 = initContext(std.mem.alignForward, .{ 1, 4 });
+    const closure1 = ctx1.bind();
+    std.testing.expectEqual(closure1.call(), 4);
 }
